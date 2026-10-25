@@ -1,0 +1,6 @@
+.venv/
+.mini-config/
+__pycache__/
+*.py[cod]
+*.egg-info/
+runs/

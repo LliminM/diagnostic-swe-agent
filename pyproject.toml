@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "diagnostic-swe-agent"
+version = "0.1.0"
+description = "Observable mini-SWE-agent foundation for diagnostic recovery research"
+requires-python = ">=3.11"
+dependencies = ["mini-swe-agent==2.4.6", "langgraph>=1.0,<2", "datasets>=3,<5"]
+
+[project.scripts]
+diagnostic-swe = "diagnostic_swe.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
