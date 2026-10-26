@@ -66,12 +66,19 @@ def run_benchmark(
         status = "error"
         error = None
         patch = ""
+        base_commit_check = None
         try:
             env = get_sb_environment(config, task.model_dump(exclude_none=True))
             if task.base_commit:
                 head = env.execute({"command": "git rev-parse HEAD"})
-                if head.get("returncode") != 0 or str(head.get("output", "")).strip() != task.base_commit:
-                    raise RuntimeError("task container HEAD differs from frozen base_commit")
+                if head.get("returncode") != 0 or head.get("exception_info"):
+                    raise RuntimeError(f"cannot read task container HEAD: {head}")
+                container_head = str(head.get("output", "")).strip()
+                base_commit_check = {
+                    "manifest_base_commit": task.base_commit,
+                    "container_head": container_head,
+                    "matches": container_head == task.base_commit,
+                }
             result = run_diagnostic_task(
                 task_id=task.instance_id,
                 task=task.problem_statement,
@@ -111,5 +118,6 @@ def run_benchmark(
             stream.write(json.dumps({
                 "instance_id": task.instance_id, "exit_status": status,
                 "error": error, "has_patch": bool(patch),
+                "base_commit_check": base_commit_check,
             }, ensure_ascii=False) + "\n")
     return predictions_path

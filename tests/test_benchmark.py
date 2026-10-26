@@ -115,7 +115,7 @@ class BenchmarkTests(unittest.TestCase):
                 container_id = "container"
                 cleaned = False
                 def execute(self, action):
-                    return {"returncode": 0, "output": "a" * 40 + "\n"}
+                    return {"returncode": 0, "output": "b" * 40 + "\n"}
                 def cleanup(self):
                     self.cleaned = True
             env = FakeEnvironment()
@@ -129,6 +129,13 @@ class BenchmarkTests(unittest.TestCase):
             self.assertEqual(runner.call_args.kwargs["recovery_enabled"], False)
             row = read_predictions(predictions)["repo__1"]
             self.assertEqual(row["model_patch"], "diff --git a/x b/x\n")
+            status = json.loads((root / "run" / "task_status.jsonl").read_text())
+            self.assertEqual(status["exit_status"], "Submitted")
+            self.assertEqual(status["base_commit_check"], {
+                "manifest_base_commit": "a" * 40,
+                "container_head": "b" * 40,
+                "matches": False,
+            })
 
 
 if __name__ == "__main__":

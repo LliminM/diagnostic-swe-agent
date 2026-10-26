@@ -62,6 +62,8 @@ cat experiments/enhanced/task_status.jsonl
 
 预期产物是 `experiments/enhanced/predictions.jsonl`，每题的轨迹、事件和诊断报告位于 `experiments/enhanced/tasks/`。若 `task_status.jsonl` 出现 `error` 或 `has_patch: false`，先查看对应记录和事件；输出目录不能重复使用，修复后应换新目录重新运行。
 
+`task_status.jsonl` 的 `base_commit_check` 同时记录数据集清单的 `base_commit` 和容器实际 `HEAD`。两者不一致时，增强版继续使用与原版 mini 相同的容器起点，并在任务工作区快照中保存实际 `HEAD`；比较或评分前应检查这项差异。诊断只会在主 Agent 运行中触发失败监测规则后产生，`full` 本身不保证有诊断报告。
+
 ## 5. 用官方 SWE-bench harness 分别评分
 
 ```bash
