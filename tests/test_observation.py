@@ -34,6 +34,32 @@ class ObservationTests(unittest.TestCase):
         self.assertFalse(success.test_failed)
         self.assertIsNone(success.error_signature)
 
+    def test_masked_pytest_failure_is_recorded_without_rewriting_shell_outcome(self):
+        timeout = record_step(
+            {"command": "timeout 30s python -m pytest -q tests/test_grid.py; echo \"pytest exit status: $?\""},
+            {"output": "pytest exit status: 124\n", "returncode": 0, "exception_info": ""},
+            None, None,
+        )
+        self.assertEqual(timeout.outcome, Outcome.SUCCESS)
+        self.assertTrue(timeout.test_failed)
+        self.assertEqual(timeout.error_signature, "pytest exit status: 124")
+
+        piped = record_step(
+            {"command": "pytest -q tests/test_grid.py | tail -20"},
+            {"output": "FAILED tests/test_grid.py::test_case\n1 failed in 0.2s\n",
+             "returncode": 0, "exception_info": ""},
+            None, None,
+        )
+        self.assertTrue(piped.test_failed)
+
+        old_log = record_step(
+            {"command": "cat old_pytest.log"},
+            {"output": "FAILED tests/test_grid.py::test_case\n", "returncode": 0,
+             "exception_info": ""},
+            None, None,
+        )
+        self.assertFalse(old_log.test_failed)
+
     def test_git_probe_detects_edits_and_keeps_model_visible_result_unchanged(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp) / "repo"

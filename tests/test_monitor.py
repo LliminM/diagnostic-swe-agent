@@ -15,13 +15,14 @@ def event(sequence, kind, data):
 def action(
     sequence, command="pytest -q", outcome=Outcome.COMMAND_FAILURE,
     signature="FAILED tests/test_parser.py::test_empty", output_hash="same-output",
-    test_failed=False, change=ChangeState.UNCHANGED,
+    test_failed=False, change=ChangeState.UNCHANGED, dirty_files=(),
 ):
     observation = ActionObservation(
         command=command, outcome=outcome, returncode=0 if outcome is Outcome.SUCCESS else 1,
         exception_info="", output_sha256=output_hash,
         error_signature=signature if outcome is not Outcome.SUCCESS else None,
-        test_failed=test_failed, code_change=CodeChange(state=change),
+        test_failed=test_failed, code_change=CodeChange(
+            state=change, dirty_files_after=list(dirty_files)),
     )
     return event(sequence, EventKind.ACTION_RESULT, {"observation": observation.model_dump(mode="json")})
 
@@ -61,6 +62,26 @@ class FailureMonitorTests(unittest.TestCase):
         decision = monitor.observe([action(2, test_failed=True)])
         self.assertEqual(decision.reason, TriggerReason.REPEATED_TEST_FAILURE)
         self.assertEqual(decision.evidence_event_sequences, [0, 1, 2])
+
+    def test_first_test_failure_after_edit_triggers_without_matching_earlier_failure(self):
+        monitor = FailureMonitor()
+        self.assertIsNone(monitor.observe([action(0, test_failed=True, signature="old failure")]))
+        self.assertIsNone(monitor.observe([action(
+            1, command="edit parser", outcome=Outcome.SUCCESS,
+            change=ChangeState.CHANGED, dirty_files=("parser.py",), output_hash="edit")]))
+        decision = monitor.observe([action(2, test_failed=True, signature="new failure",
+                                           dirty_files=("parser.py",))])
+        self.assertEqual(decision.reason, TriggerReason.POST_EDIT_TEST_FAILURE)
+        self.assertEqual(decision.evidence_event_sequences, [2])
+        self.assertIsNone(monitor.observe([action(3, test_failed=True, signature="another failure",
+                                                  dirty_files=("parser.py",))]))
+
+    def test_post_edit_trigger_requires_a_remaining_candidate_patch(self):
+        monitor = FailureMonitor()
+        self.assertIsNone(monitor.observe([action(
+            0, command="edit then revert", outcome=Outcome.SUCCESS,
+            change=ChangeState.CHANGED, dirty_files=())]))
+        self.assertIsNone(monitor.observe([action(1, test_failed=True)]))
 
     def test_no_progress_needs_three_identical_successes(self):
         monitor = FailureMonitor()

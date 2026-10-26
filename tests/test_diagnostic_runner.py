@@ -74,16 +74,72 @@ def make_repo(root):
     return repo
 
 
-def run(root, repo, factory, diagnosis, *, isolated=True):
+def run(root, repo, factory, diagnosis, *, isolated=True,
+        task="Fix module", test_command="true"):
     return run_diagnostic_task(
-        task_id="repo__issue", task="Fix module", model_factory=factory,
+        task_id="repo__issue", task=task, model_factory=factory,
         environment=LocalEnvironment(cwd=str(repo)), diagnosis_model=diagnosis,
         system_template="system", instance_template="{{task}}", output_root=root / "runs",
-        test_command="true", isolated_workspace=isolated,
+        test_command=test_command, isolated_workspace=isolated,
     )
 
 
 class DiagnosticRunnerTests(unittest.TestCase):
+    def test_unverified_warning_only_patch_gets_submission_review_before_acceptance(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = make_repo(root)
+            model = ScriptedModel([
+                ("filter warnings", "printf 'import warnings\\nwith warnings.catch_warnings():\\n    warnings.simplefilter(\"ignore\")\\n' > module.py"),
+                ("submit", SUBMIT),
+                ("capture streams too", "printf 'from contextlib import redirect_stdout, redirect_stderr\\n' >> module.py"),
+                ("submit again", SUBMIT),
+            ])
+            diagnosis = ScriptedDiagnosisModel()
+            result = run(
+                root, repo, lambda: model, diagnosis,
+                task="Deprecation warnings from numpy; avoid unexpected output",
+                test_command=None,
+            )
+            self.assertEqual(result.exit_status, "Submitted")
+            self.assertEqual(len(result.diagnosis_report_paths), 1)
+            self.assertEqual(len(result.submission_check_paths), 2)
+            self.assertEqual(len(diagnosis.calls), 0)
+            report = json.loads(result.diagnosis_report_paths[0].read_text())
+            self.assertEqual(report["category"], "verification")
+            self.assertIn("stdout", report["recommended_action"])
+            events = read_events(result.attempts[0].events_path)
+            kinds = [event.kind for event in events]
+            self.assertIn(EventKind.SUBMISSION_REJECTED, kinds)
+            self.assertIn(EventKind.DIAGNOSIS_REPORTED, kinds)
+            self.assertTrue(any("[提交前独立诊断]" in message.get("content", "")
+                                for message in model.seen_messages[2]))
+
+    def test_first_post_edit_test_failure_reaches_diagnosis_workflow(self):
+        class OneFailureDiagnosis:
+            def complete_json(self, system_prompt, user_prompt):
+                payload = json.loads(user_prompt)
+                if "candidate_categories" in payload:
+                    return {"category": "implementation", "rationale": "A post-edit test failed"}
+                sequence = payload["trigger"]["evidence_event_sequences"][-1]
+                return {"hypothesis": "The failed test needs investigation",
+                        "evidence_ids": [f"event:{sequence}"],
+                        "recommended_action": "", "recovery_mode": "none"}
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = make_repo(root)
+            model = ScriptedModel([
+                ("edit", "printf 'fixed\\n' > module.py"),
+                ("test", "python3 -c 'print(\"FAILED tests/test_module.py::test_issue\"); raise SystemExit(1)'"),
+                ("submit", SUBMIT),
+            ])
+            result = run(root, repo, lambda: model, OneFailureDiagnosis())
+            self.assertEqual(result.exit_status, "Submitted")
+            events = read_events(result.attempts[0].events_path)
+            self.assertEqual(len(result.diagnosis_report_paths), 1)
+            self.assertIn(EventKind.DIAGNOSIS_STARTED, [event.kind for event in events])
+
     def test_feedback_diagnosis_and_submission_are_persisted(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

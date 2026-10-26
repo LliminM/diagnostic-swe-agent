@@ -13,8 +13,9 @@ _PRIORITY = {
     TriggerReason.AGENT_REQUEST: 0,
     TriggerReason.TOOL_ERROR: 1,
     TriggerReason.REPEATED_TEST_FAILURE: 2,
-    TriggerReason.REPEATED_COMMAND_FAILURE: 3,
-    TriggerReason.NO_PROGRESS: 4,
+    TriggerReason.POST_EDIT_TEST_FAILURE: 3,
+    TriggerReason.REPEATED_COMMAND_FAILURE: 4,
+    TriggerReason.NO_PROGRESS: 5,
 }
 
 
@@ -31,12 +32,14 @@ class FailureMonitor:
         self._actions: deque[tuple[StepEvent, ActionObservation]] = deque(maxlen=history_size)
         self._last_sequence = -1
         self._armed = True
+        self._edited_in_episode = False
 
     def resume_after_intervention(self) -> None:
         """Forget old failures after a diagnosis has been handled."""
 
         self._actions.clear()
         self._armed = True
+        self._edited_in_episode = False
 
     def observe(self, events: Iterable[StepEvent]) -> TriggerDecision | None:
         candidates: list[TriggerDecision] = []
@@ -76,6 +79,7 @@ class FailureMonitor:
                 if not self._armed:
                     self.resume_after_intervention()
                 candidates = [item for item in candidates if item.reason is TriggerReason.AGENT_REQUEST]
+                self._edited_in_episode = bool(observation.code_change.dirty_files_after)
             self._actions.append((event, observation))
             candidates.extend(self._action_candidates())
 
@@ -130,6 +134,15 @@ class FailureMonitor:
                         )
                     )
                 break
+
+        if current.test_failed and self._edited_in_episode:
+            decisions.append(
+                TriggerDecision(
+                    reason=TriggerReason.POST_EDIT_TEST_FAILURE,
+                    evidence_event_sequences=[current_event.sequence],
+                    explanation="已有候选代码修改，首次测试失败即需要独立诊断。",
+                )
+            )
 
         if current.outcome is Outcome.COMMAND_FAILURE:
             for index in range(len(actions) - 2, -1, -1):

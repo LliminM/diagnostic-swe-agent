@@ -8,12 +8,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .diagnosis import DiagnosticWorkflow
+from .diagnosis.output_gap import has_unverified_output_suppression
 from .evidence import build_request
 from .mini_adapter import DiagnosticAgent, StepHook, SubmissionDecision, SubmissionHook
 from .monitor import FailureMonitor
 from .recording import RecordingEnvironment, RecordingModel
 from .recovery import RecoveryController, RecoveryError
-from .schemas import DiagnosisReport, DiagnosisRequest, EventKind, RecoveryMode, StepEvent, TriggerDecision
+from .schemas import (DiagnosisReport, DiagnosisRequest, EventKind, RecoveryMode, StepEvent,
+                      TriggerDecision, TriggerReason)
 from .storage import EventJournal, write_record
 from .validation import CheckStatus, SubmissionStatus, verify_recovery, verify_submission
 from .workspace import WorkspaceManager
@@ -175,6 +177,7 @@ class _DiagnosticTaskRunner:
         self.seen_incidents: set[str] = set()
         self.diagnosis_number = 0
         self.submission_number = 0
+        self.output_gap_reviewed = False
         self.next_attempt: _Attempt | None = None
         self.fatal_error: Exception | None = None
 
@@ -346,11 +349,60 @@ class _DiagnosticTaskRunner:
         path = self.run_dir / f"{label}-check.json"
         write_record(path, check)
         self.submission_check_paths.append(path)
-        attempt.journal.append(EventKind.SUBMISSION_CHECKED, {
+        check_event = attempt.journal.append(EventKind.SUBMISSION_CHECKED, {
             "status": check.status.value, "path": str(path),
         })
         if check.status is SubmissionStatus.FAIL:
             return SubmissionDecision(accept=False, feedback=f"提交前验证失败：{check.reason}\n{check.test_output or check.diff_check_output}")
+        if (check.status is SubmissionStatus.INCONCLUSIVE
+                and not self.test_command
+                and self.diagnoser is not None
+                and not self.output_gap_reviewed):
+            try:
+                candidate = self.workspace.export_candidate_patch(
+                    f"submission-{self.submission_number:03d}-candidate"
+                )
+                if has_unverified_output_suppression(self.task, candidate.patch):
+                    self.output_gap_reviewed = True
+                    self.diagnosis_number += 1
+                    label = f"diag-{self.diagnosis_number:03d}"
+                    trigger = TriggerDecision(
+                        reason=TriggerReason.SUBMISSION_OUTPUT_GAP,
+                        evidence_event_sequences=[check_event.sequence],
+                        explanation="输出相关补丁只过滤 warnings，且没有配置聚焦行为测试。",
+                    )
+                    request = build_request(
+                        request_id=label, task_id=self.task_id,
+                        problem_statement=self.task, trigger=trigger,
+                        events=attempt.journal.events_since(0), candidate=candidate,
+                        prior_reports=self.reports,
+                    )
+                    request_path = self.diagnoses_dir / f"{label}-request.json"
+                    write_record(request_path, request)
+                    self.request_paths.append(request_path)
+                    attempt.journal.append(EventKind.DIAGNOSIS_STARTED, {
+                        "request_id": label, "path": str(request_path),
+                    })
+                    report = self.diagnoser.diagnose(request)
+                    report_path = self.diagnoses_dir / f"{label}-report.json"
+                    write_record(report_path, report)
+                    self.reports.append(report)
+                    self.report_paths.append(report_path)
+                    attempt.journal.append(EventKind.DIAGNOSIS_REPORTED, {
+                        "request_id": label, "category": report.category.value,
+                        "mode": report.recovery_mode.value, "path": str(report_path),
+                    })
+                    if (self.recovery_enabled and report.recovery_mode is RecoveryMode.FEEDBACK
+                            and report.recommended_action):
+                        return SubmissionDecision(
+                            accept=False,
+                            feedback=f"[提交前独立诊断] {report.recommended_action}",
+                        )
+            except Exception as error:
+                attempt.journal.append(EventKind.DIAGNOSIS_FAILED, {
+                    "type": type(error).__name__, "message": str(error),
+                    "phase": "submission_review",
+                })
         return SubmissionDecision(accept=True)
 
     def _finalize_recovery_checks(self, attempt: _Attempt) -> None:

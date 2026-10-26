@@ -12,6 +12,10 @@ from pydantic import BaseModel, ConfigDict
 
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _TEST_FAILURE = re.compile(r"(?im)^(?:FAILED\s+\S+|--- FAIL:|FAILURES\b|\d+ failed\b|E\s+(?:AssertionError|assert\b))")
+_TEST_COMMAND = re.compile(r"\b(?:pytest|unittest|tox|nox|ctest)\b|\b(?:go|cargo)\s+test\b")
+_REPORTED_TEST_EXIT = re.compile(
+    r"(?im)^(?:pytest|test|collect)\s+exit(?:\s+status|\s+code)?\s*:\s*[1-9]\d*\b"
+)
 _ERROR_LINE = re.compile(r"(?i)^(?:FAILED\s+\S+|--- FAIL:|E\s+\S+|.*(?:Error|Exception):\s*\S+)")
 
 
@@ -150,14 +154,26 @@ def record_step(
         outcome = Outcome.SUCCESS
     else:
         outcome = Outcome.COMMAND_FAILURE
+    command = str(action.get("command", ""))
+    clean_output = _ANSI_ESCAPE.sub("", output)
+    failure_marker = bool(_TEST_FAILURE.search(clean_output))
+    reported_exit = bool(_REPORTED_TEST_EXIT.search(clean_output))
+    # Shell pipelines and a trailing `echo $?` can hide the test process's
+    # nonzero status. Keep the actual shell outcome, but record the test signal.
+    test_failed = (
+        (outcome is Outcome.COMMAND_FAILURE and failure_marker)
+        or (outcome is Outcome.SUCCESS and bool(_TEST_COMMAND.search(command))
+            and (failure_marker or reported_exit))
+    )
     return ActionObservation(
-        command=str(action.get("command", "")),
+        command=command,
         outcome=outcome,
         returncode=returncode,
         exception_info=exception_info,
         output_sha256=hashlib.sha256(output.encode("utf-8")).hexdigest(),
-        error_signature=_error_signature(exception_info or output) if outcome is not Outcome.SUCCESS else None,
-        test_failed=outcome is Outcome.COMMAND_FAILURE and bool(_TEST_FAILURE.search(_ANSI_ESCAPE.sub("", output))),
+        error_signature=_error_signature(exception_info or output)
+        if outcome is not Outcome.SUCCESS or test_failed else None,
+        test_failed=test_failed,
         code_change=_code_change(before, after),
     )
 

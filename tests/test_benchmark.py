@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from diagnostic_swe.benchmark.audit import analyze_official_instance, audit_artifacts
 from diagnostic_swe.benchmark.compare import compare
 from diagnostic_swe.benchmark.evaluate import evaluate, read_predictions
 from diagnostic_swe.benchmark.manifest import BenchmarkManifest, BenchmarkTask, load_manifest, prepare
@@ -52,6 +53,7 @@ class BenchmarkTests(unittest.TestCase):
                 report = evaluate(manifest=manifest, predictions=predictions, run_id="trial",
                                   output=root / "official")
             self.assertTrue(report.is_file())
+            self.assertEqual(json.loads((report.parent / "diagnostic-analysis.json").read_text()), [])
             with self.assertRaises(FileExistsError):
                 evaluate(manifest=manifest, predictions=predictions, run_id="trial",
                          output=root / "official")
@@ -80,6 +82,38 @@ class BenchmarkTests(unittest.TestCase):
             self.assertEqual(result["improved_ids"], ["two"])
             self.assertEqual(result["regressed_ids"], ["one"])
             self.assertEqual(result["paired"][2]["enhanced"], "empty_patch")
+
+    def test_official_audit_separates_preserved_failures_from_target_failures(self):
+        preserved = {"pydicom__case": {"resolved": False, "infra_failure": False,
+            "tests_status": {"FAIL_TO_PASS": {"failure": []},
+                             "PASS_TO_PASS": {"failure": ["tests/test_vr.py::TestOld::test_value"]}}}}
+        old_log = ("platform linux -- Python 3.9, pytest-8.3.5\n"
+                   "E AttributeError: 'TestOld' object has no attribute 'tag'\n")
+        old = analyze_official_instance("pydicom__case", preserved, old_log)
+        self.assertEqual(old["diagnosis"], "suspected_pytest_legacy_setup")
+        self.assertEqual(old["failed_target_tests"], [])
+        self.assertIn("7.4.4", old["recommendation"])
+
+        target = {"astroid__case": {"resolved": False, "infra_failure": False,
+            "tests_status": {"FAIL_TO_PASS": {"failure": ["tests/test_output.py::test_capture"]},
+                             "PASS_TO_PASS": {"failure": []}}}}
+        target_log = "capsys.readouterr()\nassert expected_out in caplog.text\n"
+        actual = analyze_official_instance("astroid__case", target, target_log)
+        self.assertEqual(actual["diagnosis"], "target_test_failure")
+        self.assertIn("stdout/stderr", actual["recommendation"])
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root / "task"
+            folder.mkdir()
+            (folder / "report.json").write_text(json.dumps(preserved), encoding="utf-8")
+            (folder / "test_output.txt").write_text(old_log, encoding="utf-8")
+            output = root / "analysis.json"
+            self.assertEqual(len(audit_artifacts(root, output)), 1)
+            self.assertEqual(json.loads(output.read_text())[0]["diagnosis"],
+                             "suspected_pytest_legacy_setup")
+            with self.assertRaises(FileExistsError):
+                audit_artifacts(root, output)
 
     def test_cli_help_and_duplicate_predictions(self):
         with self.assertRaises(SystemExit) as captured:

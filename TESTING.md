@@ -2,7 +2,7 @@
 
 本机可先运行单元测试。真实 SWE-bench 任务需要可访问模型 API、Hugging Face 数据集和 Docker 镜像。mini-SWE-agent 默认 SWE-bench 镜像针对 x86 Linux；在 Apple Silicon 上建议使用 x86_64 Linux 主机运行基线、增强版和官方评分。[mini 文档](https://mini-swe-agent.com/latest/usage/swebench/)说明了这一架构限制。
 
-以下命令从项目根目录执行；在 macOS 上根目录是 `/Users/minmin/Desktop/coding agent/diagnostic-swe-agent`。若复制到 Linux，请改用 Linux 上的项目路径。示例采用 Lite 的 `dev` split 和同一个主模型。请先按模型提供商说明设置 API 密钥，勿将密钥写入仓库。
+以下命令从项目根目录执行；本机主项目目录是 `/Users/minmin/Desktop/coding agent/diagnostic-swe-agent`。若复制到 Linux，请改用 Linux 上的项目路径。示例采用 Lite 的 `dev` split 和同一个主模型。请先按模型提供商说明设置 API 密钥，勿将密钥写入仓库。
 
 ## 1. 建立环境并运行本地测试
 
@@ -62,7 +62,7 @@ cat experiments/enhanced/task_status.jsonl
 
 预期产物是 `experiments/enhanced/predictions.jsonl`，每题的轨迹、事件和诊断报告位于 `experiments/enhanced/tasks/`。若 `task_status.jsonl` 出现 `error` 或 `has_patch: false`，先查看对应记录和事件；输出目录不能重复使用，修复后应换新目录重新运行。
 
-`task_status.jsonl` 的 `base_commit_check` 同时记录数据集清单的 `base_commit` 和容器实际 `HEAD`。两者不一致时，增强版继续使用与原版 mini 相同的容器起点，并在任务工作区快照中保存实际 `HEAD`；比较或评分前应检查这项差异。诊断只会在主 Agent 运行中触发失败监测规则后产生，`full` 本身不保证有诊断报告。
+`task_status.jsonl` 的 `base_commit_check` 同时记录数据集清单的 `base_commit` 和容器实际 `HEAD`。两者不一致时，增强版继续使用与原版 mini 相同的容器起点，并在任务工作区快照中保存实际 `HEAD`；比较或评分前应检查这项差异。在线诊断由失败监测规则触发；另外，未配置聚焦测试、提交前检查不确定且补丁只过滤 warnings 而未处理 stdout/stderr 的输出任务，会在提交前触发一次行为覆盖审查。`full` 本身不保证每题都有诊断报告。
 
 ## 5. 用官方 SWE-bench harness 分别评分
 
@@ -75,7 +75,16 @@ cat experiments/enhanced/task_status.jsonl
   --run-id enhanced-smoke-001 --output experiments/official --workers 1
 ```
 
-报告分别保存在 `experiments/official/logs/evaluation/baseline-smoke-001/results.json` 与 `.../enhanced-smoke-001/results.json`。每次更改补丁后必须使用新的 `run-id`，因为官方 harness 会复用已有评分缓存。[官方评估说明](https://github.com/SWE-bench/SWE-bench/blob/main/docs/guides/evaluation.md)
+报告分别保存在 `experiments/official/logs/evaluation/baseline-smoke-001/results.json` 与 `.../enhanced-smoke-001/results.json`；逐题失败分析另写入对应 `run-id` 目录的 `diagnostic-analysis.json`。对已有逐题 `report.json`、`test_output.txt` 可运行 `.venv/bin/diagnostic-swe audit --artifacts <评测日志目录> --output <新JSON文件>`。此分析不会改变官方评分，也不向同轮 Agent 提供隐藏测试。每次更改补丁或评测镜像后必须使用新的 `run-id`，因为官方 harness 会复用已有评分缓存。[官方评估说明](https://github.com/SWE-bench/SWE-bench/blob/main/docs/guides/evaluation.md)
+
+若 pydicom 旧测试类的 `setup()` 因 pytest 8 不被调用而缺少初始化属性，先把本项目新增的 `scripts/repair_pydicom_pytest_image.sh` 同步到运行评测的 Linux Docker 主机，再对每个相关镜像执行 `bash scripts/repair_pydicom_pytest_image.sh '<镜像名>'`。该脚本不属于 SWE-bench 或原版诊断项目；它先保留原镜像，再安装 pytest 7.4.4，并在新镜像中运行完整的 `test_valuerep.py`；只有验证通过才将新镜像标记为原评测镜像名。镜像名须来自本次任务实际使用的镜像，且基线和增强版评测应使用同一套修复后的镜像。
+
+本次 `unresolved_tasks` 轨迹记录的两个镜像可按下面方式分别修复；执行前仍要核对官方评测使用的镜像名与轨迹一致：
+
+```bash
+bash scripts/repair_pydicom_pytest_image.sh 'docker.io/swebench/sweb.eval.x86_64.pydicom_1776_pydicom-1139:latest'
+bash scripts/repair_pydicom_pytest_image.sh 'docker.io/swebench/sweb.eval.x86_64.pydicom_1776_pydicom-1413:latest'
+```
 
 ## 6. 配对比较
 

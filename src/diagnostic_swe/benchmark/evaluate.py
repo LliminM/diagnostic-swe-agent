@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .audit import audit_artifacts
 from .manifest import BenchmarkManifest
 
 
@@ -68,4 +69,5 @@ def evaluate(
     subprocess.run(command, cwd=output, check=True)
     if not report.is_file():
         raise RuntimeError(f"official harness finished without {report}")
+    audit_artifacts(report.parent, report.parent / "diagnostic-analysis.json")
     return report

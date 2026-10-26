@@ -54,9 +54,11 @@ class StepEvent(BaseModel):
 class TriggerReason(StrEnum):
     REPEATED_COMMAND_FAILURE = "repeated_command_failure"
     REPEATED_TEST_FAILURE = "repeated_test_failure"
+    POST_EDIT_TEST_FAILURE = "post_edit_test_failure"
     NO_PROGRESS = "no_progress"
     TOOL_ERROR = "tool_error"
     AGENT_REQUEST = "agent_request"
+    SUBMISSION_OUTPUT_GAP = "submission_output_gap"
 
 
 class TriggerDecision(BaseModel):

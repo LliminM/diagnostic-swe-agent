@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .benchmark.compare import compare
+from .benchmark.audit import audit_artifacts
 from .benchmark.evaluate import evaluate
 from .benchmark.manifest import load_manifest, prepare
 from .benchmark.run import VARIANTS, run_benchmark
@@ -36,6 +37,11 @@ def build_parser() -> argparse.ArgumentParser:
     grade.add_argument("--run-id", required=True)
     grade.add_argument("--output", type=Path, required=True, help="directory for official logs")
     grade.add_argument("--workers", type=int, default=1)
+
+    audit = commands.add_parser("audit", help="explain per-instance official test failures")
+    audit.add_argument("--artifacts", type=Path, required=True,
+                       help="directory containing report.json and test_output.txt pairs")
+    audit.add_argument("--output", type=Path, required=True)
 
     diff = commands.add_parser("compare", help="compare paired official harness reports")
     diff.add_argument("--manifest", type=Path, required=True)
@@ -74,6 +80,10 @@ def main(argv: list[str] | None = None) -> int:
             run_id=args.run_id, output=args.output, workers=args.workers,
         )
         print(f"Official report: {path}")
+        print(f"Diagnostic analysis: {path.parent / 'diagnostic-analysis.json'}")
+    elif args.command == "audit":
+        results = audit_artifacts(args.artifacts, args.output)
+        print(f"Analyzed {len(results)} official instance reports: {args.output}")
     elif args.command == "compare":
         result = compare(
             manifest=load_manifest(args.manifest), baseline_report=args.baseline_report,

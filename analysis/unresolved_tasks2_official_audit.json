@@ -1,0 +1,46 @@
+[
+  {
+    "instance_id": "pydicom__pydicom-1139",
+    "official_resolved": true,
+    "official_infra_failure": false,
+    "diagnosis": "resolved",
+    "failed_target_tests": [],
+    "failed_preserved_tests": [],
+    "pytest_major": 7,
+    "missing_test_field_classes": [],
+    "recommendation": "无需修复。",
+    "note": "本报告只解释官方结果，不改变 SWE-bench 评分，也不将隐藏测试反馈提供给同轮 Agent。",
+    "report_path": "/Users/minmin/Downloads/unresolved_tasks 2/lite-dev3-20261026-211440-official/logs/evaluation/enhanced-dev3-20261026-211440/diagnostic-swe-full-deepseek__deepseek-flash/pydicom__pydicom-1139/report.json",
+    "test_output_path": "/Users/minmin/Downloads/unresolved_tasks 2/lite-dev3-20261026-211440-official/logs/evaluation/enhanced-dev3-20261026-211440/diagnostic-swe-full-deepseek__deepseek-flash/pydicom__pydicom-1139/test_output.txt"
+  },
+  {
+    "instance_id": "pydicom__pydicom-1413",
+    "official_resolved": true,
+    "official_infra_failure": false,
+    "diagnosis": "resolved",
+    "failed_target_tests": [],
+    "failed_preserved_tests": [],
+    "pytest_major": 7,
+    "missing_test_field_classes": [],
+    "recommendation": "无需修复。",
+    "note": "本报告只解释官方结果，不改变 SWE-bench 评分，也不将隐藏测试反馈提供给同轮 Agent。",
+    "report_path": "/Users/minmin/Downloads/unresolved_tasks 2/lite-dev3-20261026-211440-official/logs/evaluation/enhanced-dev3-20261026-211440/diagnostic-swe-full-deepseek__deepseek-flash/pydicom__pydicom-1413/report.json",
+    "test_output_path": "/Users/minmin/Downloads/unresolved_tasks 2/lite-dev3-20261026-211440-official/logs/evaluation/enhanced-dev3-20261026-211440/diagnostic-swe-full-deepseek__deepseek-flash/pydicom__pydicom-1413/test_output.txt"
+  },
+  {
+    "instance_id": "pylint-dev__astroid-1978",
+    "official_resolved": false,
+    "official_infra_failure": false,
+    "diagnosis": "target_test_failure",
+    "failed_target_tests": [
+      "tests/unittest_raw_building.py::test_build_module_getattr_catch_output"
+    ],
+    "failed_preserved_tests": [],
+    "pytest_major": 8,
+    "missing_test_field_classes": [],
+    "recommendation": "目标测试要求输出进入日志且不泄漏到 stdout/stderr；检查 getattr 等调用期间的标准输出和标准错误捕获。仅过滤 Python warnings 不足以满足该断言。",
+    "note": "本报告只解释官方结果，不改变 SWE-bench 评分，也不将隐藏测试反馈提供给同轮 Agent。",
+    "report_path": "/Users/minmin/Downloads/unresolved_tasks 2/lite-dev3-20261026-211440-official/logs/evaluation/enhanced-dev3-20261026-211440/diagnostic-swe-full-deepseek__deepseek-flash/pylint-dev__astroid-1978/report.json",
+    "test_output_path": "/Users/minmin/Downloads/unresolved_tasks 2/lite-dev3-20261026-211440-official/logs/evaluation/enhanced-dev3-20261026-211440/diagnostic-swe-full-deepseek__deepseek-flash/pylint-dev__astroid-1978/test_output.txt"
+  }
+]
