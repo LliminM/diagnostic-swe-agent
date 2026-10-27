@@ -58,7 +58,7 @@ class TriggerReason(StrEnum):
     NO_PROGRESS = "no_progress"
     TOOL_ERROR = "tool_error"
     AGENT_REQUEST = "agent_request"
-    SUBMISSION_OUTPUT_GAP = "submission_output_gap"
+    SUBMISSION_UNVERIFIED = "submission_unverified"
 
 
 class TriggerDecision(BaseModel):

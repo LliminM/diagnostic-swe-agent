@@ -29,7 +29,7 @@ def candidate_categories(request: DiagnosisRequest) -> tuple[FailureCategory, ..
     elif reason is TriggerReason.NO_PROGRESS:
         candidates.update({FailureCategory.CONTROL_FLOW, FailureCategory.UNDERSTANDING,
                            FailureCategory.LOCALIZATION})
-    elif reason is TriggerReason.SUBMISSION_OUTPUT_GAP:
+    elif reason is TriggerReason.SUBMISSION_UNVERIFIED:
         candidates.update({FailureCategory.VERIFICATION, FailureCategory.IMPLEMENTATION})
     else:
         candidates.update(category for category in FailureCategory if category is not FailureCategory.UNKNOWN)

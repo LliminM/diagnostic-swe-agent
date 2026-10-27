@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .diagnosis import DiagnosticWorkflow
-from .diagnosis.output_gap import has_unverified_output_suppression
 from .evidence import build_request
 from .mini_adapter import DiagnosticAgent, StepHook, SubmissionDecision, SubmissionHook
 from .monitor import FailureMonitor
@@ -177,7 +176,7 @@ class _DiagnosticTaskRunner:
         self.seen_incidents: set[str] = set()
         self.diagnosis_number = 0
         self.submission_number = 0
-        self.output_gap_reviewed = False
+        self.submission_reviewed = False
         self.next_attempt: _Attempt | None = None
         self.fatal_error: Exception | None = None
 
@@ -357,19 +356,18 @@ class _DiagnosticTaskRunner:
         if (check.status is SubmissionStatus.INCONCLUSIVE
                 and not self.test_command
                 and self.diagnoser is not None
-                and not self.output_gap_reviewed):
+                and not self.submission_reviewed):
             try:
                 candidate = self.workspace.export_candidate_patch(
                     f"submission-{self.submission_number:03d}-candidate"
                 )
-                if has_unverified_output_suppression(self.task, candidate.patch):
-                    self.output_gap_reviewed = True
+                if candidate.patch:
                     self.diagnosis_number += 1
                     label = f"diag-{self.diagnosis_number:03d}"
                     trigger = TriggerDecision(
-                        reason=TriggerReason.SUBMISSION_OUTPUT_GAP,
+                        reason=TriggerReason.SUBMISSION_UNVERIFIED,
                         evidence_event_sequences=[check_event.sequence],
-                        explanation="输出相关补丁只过滤 warnings，且没有配置聚焦行为测试。",
+                        explanation="没有配置聚焦测试，提交前检查无法验证候选补丁的任务行为。",
                     )
                     request = build_request(
                         request_id=label, task_id=self.task_id,
@@ -388,6 +386,7 @@ class _DiagnosticTaskRunner:
                     write_record(report_path, report)
                     self.reports.append(report)
                     self.report_paths.append(report_path)
+                    self.submission_reviewed = True
                     attempt.journal.append(EventKind.DIAGNOSIS_REPORTED, {
                         "request_id": label, "category": report.category.value,
                         "mode": report.recovery_mode.value, "path": str(report_path),

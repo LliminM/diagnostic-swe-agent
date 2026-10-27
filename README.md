@@ -23,7 +23,7 @@
 
 `WorkspaceManager` 在 Agent 开始修改前调用 `snapshot()`，要求任务仓库是干净的 Git 工作区，且宿主机产物目录位于仓库外。`export_candidate_patch()` 将当前已跟踪文件相对初始 commit 的修改保存为补丁，并列出未跟踪路径；补丁文件不包含未跟踪文件内容。`restore()` 会运行 Git 重置与清理命令，因此只有构造时明确设置 `isolated_workspace=True` 才能调用，应用场景是一次性 SWE-bench 任务容器。忽略文件不在快照和恢复范围内。`build_request()` 使用当前介入轮次的原始事件、候选补丁和既往诊断报告构造独立诊断请求。
 
-`DiagnosticWorkflow(model, environment).diagnose(request)` 是独立诊断入口。LangGraph 先用监测信号缩小失败类别候选，再让诊断模型分类，并按类别运行只读命令（如 `git diff --check`、`git ls-files`），最后生成 `DiagnosisReport`。当事件包含失败的 pytest 测试类时，诊断会先读取 pytest 版本及该测试类的源码片段；若 pytest 8 以上版本遇到依靠 nose 风格 `setup()` 初始化缺失属性的测试，会明确归为镜像兼容性问题，建议修复镜像，不让主 Agent 修改任务代码来掩盖它。分类覆盖需求理解、定位、实现、验证、环境和流程控制；允许返回 `unknown`。`LiteLLMDiagnosticModel(model_name)` 每次只接收诊断专用的 system/user 消息，不传主 Agent 历史消息或执行工具。调用时应传入**原始任务环境**，不要传 `RecordingEnvironment`，避免诊断命令混入主 Agent 事件流。
+`DiagnosticWorkflow(model, environment).diagnose(request)` 是独立诊断入口。LangGraph 先用监测信号缩小失败类别候选，再让诊断模型分类，并按类别运行只读命令（如 `git diff --check`、`git ls-files`），最后生成 `DiagnosisReport`。当事件包含失败的 pytest 测试类时，诊断会先读取 pytest 版本及该测试类的源码片段；旧式 `setup()` 与缺失属性的组合仅作为待验证的环境假设提供给模型，不自动归类，也不指定固定依赖版本。分类覆盖需求理解、定位、实现、验证、环境和流程控制；允许返回 `unknown`。`LiteLLMDiagnosticModel(model_name)` 每次只接收诊断专用的 system/user 消息，不传主 Agent 历史消息或执行工具。调用时应传入**原始任务环境**，不要传 `RecordingEnvironment`，避免诊断命令混入主 Agent 事件流。
 
 模型只能引用请求事件、任务、diff 和只读取证的有效编号；恢复建议必须至少引用本次触发事件。无效 JSON、越界分类或缺失证据会降级为无恢复动作。诊断模块只产出建议，由 `recovery.py` 决定是否执行。使用方法：
 
@@ -38,9 +38,9 @@ report = workflow.diagnose(request)  # request 为 build_request() 的返回值
 
 `verify_recovery(request, subsequent_events)` 只有在介入后**同一失败命令**重跑成功时才报告 `improved`；相同失败再现报告 `unchanged`，未重跑或出现不同失败报告 `inconclusive`。`verify_submission(environment, snapshot=..., test_command=...)` 核对任务仓库、非空候选补丁、未跟踪文件、Git diff 格式及调用方明确配置的聚焦测试，并在测试后复查工作区。mini 默认提示词生成的临时 `patch.txt` 仅在其内容与实际提交完全相同时例外；其他未跟踪文件仍拒绝。测试命令必须来自可信运行配置，不能取自诊断建议；未配置测试时结果为 `inconclusive`。这些检查不替代后续 SWE-bench 官方评估。
 
-提交前检查为 `inconclusive` 且未配置聚焦测试时，runner 还会检查一种可核查的覆盖缺口：任务涉及警告或输出，新增补丁只过滤 Python warnings，却没有处理 stdout/stderr。命中后只做一次提交前独立诊断，依据任务文本、补丁和提交检查事件，建议主 Agent 用可控对象复现两条输出通道，必要时捕获并记录日志；`full` 版本会退回首次提交并给出该建议。已通过聚焦测试或无此缺口的任务不会因此触发诊断。这项静态检查只是提示未验证的行为，不声称候选补丁已在官方目标测试中失败。
+提交前检查为 `inconclusive`、未配置聚焦测试且存在候选补丁时，runner 会执行一次独立的行为覆盖审查。诊断模型对照任务要求、补丁和已有测试证据，指出具体而尚未验证的行为，并建议最小的聚焦测试；找不到具体缺口时可以不阻止提交。警告和输出任务会分别考虑相关输出通道，但不会预设每个任务都要捕获 stdout/stderr。`full` 版本只在报告提供可核查反馈时退回首次提交。此审查不能替代官方目标测试。
 
-`run_diagnostic_task(...)` 把以上模块接入单任务运行。调用方提供 `model_factory`，使每次重启都创建新的主 Agent 模型实例；任务环境保持同一个隔离仓库。触发诊断后，它会保存请求、报告和候选补丁，执行报告允许的恢复动作，并在后续事件中寻找同一失败命令的复测结果。相同失败和相同补丁只诊断一次。提交前验证明确失败时，反馈会退回主 Agent；验证结果不确定时通常允许提交，输出过滤覆盖缺口例外。每次尝试分别保存 `attempt-001/` 等轨迹与事件，任务目录还包含 `diagnoses/`、提交检查、最终补丁和 `manifest.json`。`run_task(...)` 仍是无需诊断的基础入口。
+`run_diagnostic_task(...)` 把以上模块接入单任务运行。调用方提供 `model_factory`，使每次重启都创建新的主 Agent 模型实例；任务环境保持同一个隔离仓库。触发诊断后，它会保存请求、报告和候选补丁，执行报告允许的恢复动作，并在后续事件中寻找同一失败命令的复测结果。相同失败和相同补丁只诊断一次。提交前验证明确失败时，反馈会退回主 Agent；验证结果不确定时，先运行一次行为覆盖审查，再依诊断报告决定是否退回。每次尝试分别保存 `attempt-001/` 等轨迹与事件，任务目录还包含 `diagnoses/`、提交检查、最终补丁和 `manifest.json`。`run_task(...)` 仍是无需诊断的基础入口。
 
 ```python
 from diagnostic_swe import run_diagnostic_task

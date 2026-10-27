@@ -85,7 +85,22 @@ def run(root, repo, factory, diagnosis, *, isolated=True,
 
 
 class DiagnosticRunnerTests(unittest.TestCase):
-    def test_unverified_warning_only_patch_gets_submission_review_before_acceptance(self):
+    def test_unverified_submission_gets_model_review_before_acceptance(self):
+        class ReviewDiagnosis:
+            def __init__(self):
+                self.calls = []
+
+            def complete_json(self, system_prompt, user_prompt):
+                payload = json.loads(user_prompt)
+                self.calls.append(payload)
+                sequence = payload["trigger"]["evidence_event_sequences"][-1]
+                return {
+                    "hypothesis": "The patch has no focused behavior check",
+                    "evidence_ids": ["task", "diff", f"event:{sequence}"],
+                    "recommended_action": "Test the relevant output channels with a controlled object.",
+                    "recovery_mode": "feedback",
+                }
+
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             repo = make_repo(root)
@@ -95,7 +110,7 @@ class DiagnosticRunnerTests(unittest.TestCase):
                 ("capture streams too", "printf 'from contextlib import redirect_stdout, redirect_stderr\\n' >> module.py"),
                 ("submit again", SUBMIT),
             ])
-            diagnosis = ScriptedDiagnosisModel()
+            diagnosis = ReviewDiagnosis()
             result = run(
                 root, repo, lambda: model, diagnosis,
                 task="Deprecation warnings from numpy; avoid unexpected output",
@@ -104,16 +119,39 @@ class DiagnosticRunnerTests(unittest.TestCase):
             self.assertEqual(result.exit_status, "Submitted")
             self.assertEqual(len(result.diagnosis_report_paths), 1)
             self.assertEqual(len(result.submission_check_paths), 2)
-            self.assertEqual(len(diagnosis.calls), 0)
+            self.assertEqual(len(diagnosis.calls), 1)
+            self.assertEqual(diagnosis.calls[0]["trigger"]["reason"], "submission_unverified")
+            self.assertIn("Deprecation warnings", diagnosis.calls[0]["evidence"]["task"])
+            self.assertIn("warnings.catch_warnings", diagnosis.calls[0]["evidence"]["diff"])
             report = json.loads(result.diagnosis_report_paths[0].read_text())
             self.assertEqual(report["category"], "verification")
-            self.assertIn("stdout", report["recommended_action"])
+            self.assertIn("output channels", report["recommended_action"])
             events = read_events(result.attempts[0].events_path)
             kinds = [event.kind for event in events]
             self.assertIn(EventKind.SUBMISSION_REJECTED, kinds)
             self.assertIn(EventKind.DIAGNOSIS_REPORTED, kinds)
             self.assertTrue(any("[提交前独立诊断]" in message.get("content", "")
                                 for message in model.seen_messages[2]))
+
+    def test_unverified_unrelated_patch_can_be_accepted_after_model_review(self):
+        class NoGapDiagnosis:
+            def complete_json(self, system_prompt, user_prompt):
+                return {"hypothesis": "No specific missing behavior was found",
+                        "evidence_ids": ["task"],
+                        "recommended_action": "", "recovery_mode": "none"}
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = make_repo(root)
+            model = ScriptedModel([
+                ("fix empty input", "printf 'fixed\\n' > module.py"),
+                ("submit", SUBMIT),
+            ])
+            result = run(root, repo, lambda: model, NoGapDiagnosis(),
+                         task="Handle empty input", test_command=None)
+            self.assertEqual(result.exit_status, "Submitted")
+            self.assertEqual(len(result.diagnosis_report_paths), 1)
+            self.assertEqual(len(result.submission_check_paths), 1)
 
     def test_first_post_edit_test_failure_reaches_diagnosis_workflow(self):
         class OneFailureDiagnosis:

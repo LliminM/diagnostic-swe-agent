@@ -8,7 +8,6 @@ from pathlib import Path
 from diagnostic_swe.diagnosis import DiagnosticWorkflow, LiteLLMDiagnosticModel
 from diagnostic_swe.diagnosis.classification import candidate_categories
 from diagnostic_swe.diagnosis.compatibility import detect_legacy_pytest_setup
-from diagnostic_swe.diagnosis.output_gap import has_unverified_output_suppression
 from diagnostic_swe.diagnosis.probes import ProbeResult, ReadOnlyProbes
 from diagnostic_swe.schemas import (
     DiagnosisRequest, EventKind, FailureCategory, RecoveryMode, StepEvent,
@@ -93,29 +92,23 @@ def legacy_pytest_request():
 
 
 class DiagnosisWorkflowTests(unittest.TestCase):
-    def test_output_suppression_review_needs_task_and_added_warning_only_patch(self):
-        task = "Deprecation warnings from numpy. There should be no future warnings."
-        warning_only = ("diff --git a/raw_building.py b/raw_building.py\n"
-                        "+with warnings.catch_warnings():\n"
-                        "+    warnings.simplefilter(\"ignore\")\n"
-                        "+    getattr(module, name)\n")
-        self.assertTrue(has_unverified_output_suppression(task, warning_only))
-        self.assertFalse(has_unverified_output_suppression(
-            "Make PersonName iterable", warning_only))
-        self.assertFalse(has_unverified_output_suppression(
-            task, warning_only + "+with redirect_stdout(buffer), redirect_stderr(buffer):\n"))
-        self.assertFalse(has_unverified_output_suppression(
-            task, "-with warnings.catch_warnings():\n+return value\n"))
-
-    def test_pytest_8_legacy_setup_is_diagnosed_as_environment_with_source_evidence(self):
-        model = FakeModel()
+    def test_legacy_setup_is_a_model_visible_hypothesis_not_a_forced_fix(self):
+        model = FakeModel(
+            {"category": "environment", "rationale": "The runner may skip setup"},
+            {"hypothesis": "The legacy setup may not have run",
+             "evidence_ids": ["event:2", "tool:pytest-version", "tool:failed-test-source-1"],
+             "recommended_action": "Reproduce on unchanged code before changing dependencies.",
+             "recovery_mode": "feedback"},
+        )
         environment = LegacyPytestEnvironment()
         report = DiagnosticWorkflow(model, environment).diagnose(legacy_pytest_request())
         self.assertEqual(report.category, FailureCategory.ENVIRONMENT)
         self.assertEqual(report.recovery_mode, RecoveryMode.FEEDBACK)
-        self.assertIn("pytest", report.recommended_action)
-        self.assertEqual({item.source for item in report.evidence}, {"event", "tool", "diff"})
-        self.assertEqual(model.calls, [])
+        self.assertNotIn("7.4.4", report.recommended_action)
+        self.assertEqual({item.source for item in report.evidence}, {"event", "tool"})
+        self.assertEqual(len(model.calls), 2)
+        self.assertEqual(model.calls[0][1]["environment_hypothesis"]["attribute_name"], "tag")
+        self.assertEqual(model.calls[1][1]["environment_hypothesis"]["class_name"], "TestBadValueRead")
         self.assertTrue(any(command.startswith("git grep") for command, _ in environment.commands))
 
     def test_legacy_setup_detection_requires_pytest_8_and_legacy_method(self):

@@ -90,9 +90,10 @@ class BenchmarkTests(unittest.TestCase):
         old_log = ("platform linux -- Python 3.9, pytest-8.3.5\n"
                    "E AttributeError: 'TestOld' object has no attribute 'tag'\n")
         old = analyze_official_instance("pydicom__case", preserved, old_log)
-        self.assertEqual(old["diagnosis"], "suspected_pytest_legacy_setup")
+        self.assertEqual(old["diagnosis"], "preserved_test_failure")
         self.assertEqual(old["failed_target_tests"], [])
-        self.assertIn("7.4.4", old["recommendation"])
+        self.assertEqual(old["environment_hypotheses"], ["legacy_setup_runner_mismatch"])
+        self.assertNotIn("7.4.4", old["recommendation"])
 
         target = {"astroid__case": {"resolved": False, "infra_failure": False,
             "tests_status": {"FAIL_TO_PASS": {"failure": ["tests/test_output.py::test_capture"]},
@@ -100,7 +101,8 @@ class BenchmarkTests(unittest.TestCase):
         target_log = "capsys.readouterr()\nassert expected_out in caplog.text\n"
         actual = analyze_official_instance("astroid__case", target, target_log)
         self.assertEqual(actual["diagnosis"], "target_test_failure")
-        self.assertIn("stdout/stderr", actual["recommendation"])
+        self.assertIn("目标测试仍失败", actual["recommendation"])
+        self.assertEqual(actual["environment_hypotheses"], [])
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -111,7 +113,7 @@ class BenchmarkTests(unittest.TestCase):
             output = root / "analysis.json"
             self.assertEqual(len(audit_artifacts(root, output)), 1)
             self.assertEqual(json.loads(output.read_text())[0]["diagnosis"],
-                             "suspected_pytest_legacy_setup")
+                             "preserved_test_failure")
             with self.assertRaises(FileExistsError):
                 audit_artifacts(root, output)
 

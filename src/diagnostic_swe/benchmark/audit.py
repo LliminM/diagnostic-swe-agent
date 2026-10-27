@@ -33,6 +33,7 @@ def analyze_official_instance(instance_id: str, report: dict, test_output: str) 
     version = _PYTEST_VERSION.search(test_output)
     pytest_major = int(version.group(1)) if version else None
     missing_classes = sorted(set(_MISSING_TEST_FIELD.findall(test_output)))
+    environment_hypotheses: list[str] = []
 
     if target_failures:
         diagnosis = "target_test_failure"
@@ -40,13 +41,6 @@ def analyze_official_instance(instance_id: str, report: dict, test_output: str) 
             "目标测试仍失败：检查失败断言和候选补丁覆盖的行为；修复后重新运行 agent "
             "并以新的 predictions 评测。"
         )
-        if "caplog.text" in test_output and (
-            "capsys.readouterr" in test_output or "sys.stderr" in test_output
-        ):
-            recommendation = (
-                "目标测试要求输出进入日志且不泄漏到 stdout/stderr；检查 getattr 等调用期间的"
-                "标准输出和标准错误捕获。仅过滤 Python warnings 不足以满足该断言。"
-            )
     elif preserved_failures:
         diagnosis = "preserved_test_failure"
         recommendation = (
@@ -54,11 +48,11 @@ def analyze_official_instance(instance_id: str, report: dict, test_output: str) 
             "确认是否为预存的测试环境问题，再决定修改补丁或镜像。"
         )
         if pytest_major is not None and pytest_major >= 8 and missing_classes:
-            diagnosis = "suspected_pytest_legacy_setup"
+            environment_hypotheses.append("legacy_setup_runner_mismatch")
             recommendation = (
-                "目标测试已通过。pytest 8 已移除 nose 风格 setup()/teardown() 支持；"
-                "检查失败测试类是否依靠 setup() 初始化缺失属性。若是，请在任务及官方评测镜像"
-                "的 testbed 环境将 pytest 固定为 7.4.4，并先用原始代码复测失败节点。"
+                "目标测试已通过。检查失败类是否依靠旧式 setup() 初始化缺失属性，"
+                "并在相同环境中用原始代码复测；确认是测试框架兼容问题后，再选择"
+                "与该项目兼容的测试依赖版本。"
             )
     elif entry.get("resolved") is True:
         diagnosis = "resolved"
@@ -76,6 +70,7 @@ def analyze_official_instance(instance_id: str, report: dict, test_output: str) 
         "failed_preserved_tests": preserved_failures,
         "pytest_major": pytest_major,
         "missing_test_field_classes": missing_classes,
+        "environment_hypotheses": environment_hypotheses,
         "recommendation": recommendation,
         "note": "本报告只解释官方结果，不改变 SWE-bench 评分，也不将隐藏测试反馈提供给同轮 Agent。",
     }
